@@ -220,6 +220,7 @@ footer { background:#0a2540; color:white; padding:3rem 5%; text-align:center; }
 
 <script>
 var SHEET_URL = 'https://script.google.com/macros/s/AKfycbySPls79IP6cjBrqyxCIx3RwHNBuXXt5NNb-7fjnCoVOBFF_BevPwaY4c1umOD5tBUs/exec';
+var isBookingInProgress = false; // LOCKING VARIABLE
 
 var DOC_INFO = {
   'Dr. Ayesha Tariq':  { days:[1,2,3,4,5,6], startH:10, endH:14, dayNames:'Mon-Sat', hours:'10:00 AM - 2:00 PM' },
@@ -246,22 +247,8 @@ function saveToSheets(data, onSuccess, onDuplicate, onError) {
 }
 
 function parseDate(str) {
-  // Try YYYY-MM-DD first
   var iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (iso) return new Date(parseInt(iso[1]), parseInt(iso[2])-1, parseInt(iso[3]));
-  // Try DD-MM-YYYY
-  var dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
-  if (dmy) return new Date(parseInt(dmy[3]), parseInt(dmy[2])-1, parseInt(dmy[1]));
-  // Try "3 may 2026" or "may 3 2026"
-  var months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-  var parts = str.toLowerCase().trim().split(/[\s,]+/);
-  var day, month, year;
-  for (var i=0; i<parts.length; i++) {
-    if (months[parts[i].substring(0,3)] !== undefined) month = months[parts[i].substring(0,3)];
-    else if (parseInt(parts[i]) > 31) year = parseInt(parts[i]);
-    else if (parseInt(parts[i]) > 0) day = parseInt(parts[i]);
-  }
-  if (day && month !== undefined && year) return new Date(year, month, day);
   return new Date(str);
 }
 
@@ -269,7 +256,6 @@ function parseTime(str) {
   str = str.toLowerCase().trim();
   var isPM = str.indexOf('pm') !== -1;
   var isAM = str.indexOf('am') !== -1;
-  // Remove am/pm text
   str = str.replace('pm','').replace('am','').trim();
   var parts = str.split(':');
   var hour = parseInt(parts[0]) || 0;
@@ -282,22 +268,15 @@ function parseTime(str) {
 function validateDoctor(doctor, dateStr, timeStr) {
   var info = DOC_INFO[doctor];
   if (!info) return { ok: true };
-  
   var d = parseDate(dateStr);
-  if (!d || isNaN(d.getTime())) return { ok: false, msg: 'Could not understand the date. Please use format like 2026-05-12.' };
-  
+  if (!d || isNaN(d.getTime())) return { ok: false, msg: 'Could not understand the date. Please use YYYY-MM-DD.' };
   var dayOfWeek = d.getDay();
-  if (dayOfWeek === 0) return { ok: false, msg: 'Clinic is closed on Sundays! Please choose another day.' };
-  if (info.days.indexOf(dayOfWeek) === -1) {
-    return { ok: false, msg: doctor + ' is NOT available on this day!\nAvailable days: ' + info.dayNames };
-  }
-  
+  if (dayOfWeek === 0) return { ok: false, msg: 'Clinic is closed on Sundays!' };
+  if (info.days.indexOf(dayOfWeek) === -1) return { ok: false, msg: doctor + ' is NOT available on this day!' };
   if (timeStr && timeStr.trim()) {
     var t = parseTime(timeStr);
     var totalMins = t.hour * 60 + t.min;
-    if (totalMins < info.startH * 60 || totalMins >= info.endH * 60) {
-      return { ok: false, msg: doctor + ' is NOT available at this time!\nWorking hours: ' + info.hours };
-    }
+    if (totalMins < info.startH * 60 || totalMins >= info.endH * 60) return { ok: false, msg: doctor + ' is NOT available at this time!' };
   }
   return { ok: true };
 }
@@ -319,77 +298,37 @@ function validateFormDate() {
   var err = document.getElementById('date-error');
   if (!doc || !date) { err.style.display = 'none'; return; }
   var result = validateDoctor(doc, date, null);
-  if (!result.ok) {
-    err.textContent = result.msg;
-    err.style.display = 'block';
-  } else {
-    err.style.display = 'none';
-  }
+  if (!result.ok) { err.textContent = result.msg; err.style.display = 'block'; } else { err.style.display = 'none'; }
 }
 
 function submitForm() {
+  if (isBookingInProgress) return;
   var n = document.getElementById('f-name').value.trim();
   var p = document.getElementById('f-phone').value.trim();
   var d = document.getElementById('f-doctor').value;
   var dt = document.getElementById('f-date').value;
   var tm = document.getElementById('f-time').value;
   var nt = document.getElementById('f-notes').value.trim();
-
-  document.getElementById('success-msg').style.display = 'none';
-  document.getElementById('error-msg').style.display = 'none';
-
   if (!n || !p || !d || !dt || !tm) { alert('Please fill in all required fields.'); return; }
-
   var validation = validateDoctor(d, dt, tm);
-  if (!validation.ok) {
-    var err = document.getElementById('error-msg');
-    err.textContent = validation.msg;
-    err.style.display = 'block';
-    return;
-  }
+  if (!validation.ok) { alert(validation.msg); return; }
 
+  isBookingInProgress = true;
   var btn = document.getElementById('submit-btn');
-  btn.textContent = 'Submitting...';
-  btn.disabled = true;
+  btn.textContent = 'Processing...';
 
   saveToSheets(
     { patient_name:n, phone_number:p, doctor_name:d, appointment_date:dt, appointment_time:tm, notes:nt },
-    function() {
-      document.getElementById('success-msg').style.display = 'block';
-      btn.textContent = 'Confirm Appointment';
-      btn.disabled = false;
-      document.getElementById('f-name').value = '';
-      document.getElementById('f-phone').value = '';
-      document.getElementById('f-doctor').value = '';
-      document.getElementById('f-date').value = '';
-      document.getElementById('f-time').value = '';
-      document.getElementById('f-notes').value = '';
-      document.getElementById('time-hint').style.display = 'none';
-      setTimeout(function() { document.getElementById('success-msg').style.display = 'none'; }, 5000);
-    },
-    function() {
-      var err = document.getElementById('error-msg');
-      err.textContent = 'This time slot is already booked for ' + d + ' on ' + dt + ' at ' + tm + '. Please choose a different time.';
-      err.style.display = 'block';
-      btn.textContent = 'Confirm Appointment';
-      btn.disabled = false;
-    },
-    function() {
-      alert('Connection error. Please try again.');
-      btn.textContent = 'Confirm Appointment';
-      btn.disabled = false;
-    }
+    function() { isBookingInProgress = false; alert('Booked successfully!'); btn.textContent = 'Confirm Appointment'; },
+    function() { isBookingInProgress = false; alert('Slot taken!'); btn.textContent = 'Confirm Appointment'; },
+    function() { isBookingInProgress = false; alert('Error!'); btn.textContent = 'Confirm Appointment'; }
   );
 }
 
 document.getElementById('f-date').min = new Date().toISOString().split('T')[0];
 
-var isOpen = false;
-var step = 'idle';
-var bk = {};
-
-var DOCTORS = { '1':'Dr. Ayesha Tariq','2':'Dr. Bilal Hussain','3':'Dr. Sana Mirza','4':'Dr. Usman Khalid',
-  'ayesha':'Dr. Ayesha Tariq','bilal':'Dr. Bilal Hussain','sana':'Dr. Sana Mirza','usman':'Dr. Usman Khalid' };
+var isOpen = false, step = 'idle', bk = {};
+var DOCTORS = { '1':'Dr. Ayesha Tariq','2':'Dr. Bilal Hussain','3':'Dr. Sana Mirza','4':'Dr. Usman Khalid' };
 
 function addMsg(text, isUser) {
   var d = document.createElement('div');
@@ -402,72 +341,38 @@ function addMsg(text, isUser) {
 
 function getReply(text) {
   var t = text.toLowerCase().trim();
-
-  if (t.match(/chest pain|bleeding|cant breathe|emergency/)) {
-    step = 'idle'; bk = {};
-    return 'EMERGENCY: Please call 1122 immediately or go to nearest hospital!';
-  }
-
   if (step === 'get_name') { bk.name = text.trim(); step = 'get_phone'; return 'Thank you ' + bk.name + '! Please share your phone number.'; }
-
-  if (step === 'get_phone') { bk.phone = text.trim(); step = 'get_doctor';
-    return 'Which doctor?\n\n1. Dr. Ayesha Tariq - General Physician (Rs. 1,500)\n   Days: Mon-Sat, Time: 10AM-2PM\n\n2. Dr. Bilal Hussain - Cardiologist (Rs. 3,000)\n   Days: Mon/Wed/Fri, Time: 3PM-7PM\n\n3. Dr. Sana Mirza - Gynecologist (Rs. 2,500)\n   Days: Tue/Thu/Sat, Time: 11AM-3PM\n\n4. Dr. Usman Khalid - Orthopedic (Rs. 2,500)\n   Days: Mon-Fri, Time: 4PM-8PM\n\nType 1, 2, 3 or 4.';
-  }
-
+  if (step === 'get_phone') { bk.phone = text.trim(); step = 'get_doctor'; return 'Type 1, 2, 3 or 4 for doctor selection.'; }
   if (step === 'get_doctor') {
-    var doc = DOCTORS[t] || DOCTORS[t.replace('dr.','').trim().split(' ')[0]];
-    if (!doc) return 'Please type 1, 2, 3 or 4.';
-    bk.doctor = doc;
-    step = 'get_date';
-    var info = DOC_INFO[doc];
-    return 'You selected ' + doc + '.\nAvailable: ' + info.dayNames + ', ' + info.hours + '\n\nWhat date? Use format YYYY-MM-DD (e.g. 2026-05-12)';
+    var doc = DOCTORS[t]; if (!doc) return 'Type 1, 2, 3 or 4.';
+    bk.doctor = doc; step = 'get_date'; return 'Enter date YYYY-MM-DD.';
   }
-
   if (step === 'get_date') {
-    var dateInput = text.trim();
-    var validation = validateDoctor(bk.doctor, dateInput, null);
-    if (!validation.ok) return validation.msg + '\n\nPlease enter another date (YYYY-MM-DD).';
-    bk.date = dateInput;
-    var info = DOC_INFO[bk.doctor];
-    step = 'get_time';
-    return 'Available time: ' + info.hours + '\n\nWhat time? Use 24h format (e.g. 10:00 or 16:00)';
+    var validation = validateDoctor(bk.doctor, text.trim(), null);
+    if (!validation.ok) return validation.msg;
+    bk.date = text.trim(); step = 'get_time'; return 'Enter time (HH:MM).';
   }
-
   if (step === 'get_time') {
-    var timeInput = text.trim();
-    var validation = validateDoctor(bk.doctor, bk.date, timeInput);
-    if (!validation.ok) return validation.msg + '\n\nPlease enter a valid time.';
-    bk.time = timeInput;
-    step = 'confirm';
-    return 'Please confirm:\n\nName: ' + bk.name + '\nPhone: ' + bk.phone + '\nDoctor: ' + bk.doctor + '\nDate: ' + bk.date + '\nTime: ' + bk.time + '\n\nType YES to confirm or NO to cancel.';
+    var validation = validateDoctor(bk.doctor, bk.date, text.trim());
+    if (!validation.ok) return validation.msg;
+    bk.time = text.trim(); step = 'confirm'; return 'Confirm? Type YES.';
   }
-
   if (step === 'confirm') {
-    if (t.match(/^yes$|^y$|confirm|haan/)) {
-      var saved = { name:bk.name, phone:bk.phone, doctor:bk.doctor, date:bk.date, time:bk.time };
-      step = 'idle'; bk = {};
+    if (t.match(/yes|confirm/)) {
+      if (isBookingInProgress) return 'Already processing...';
+      isBookingInProgress = true;
       saveToSheets(
-        { patient_name:saved.name, phone_number:saved.phone, doctor_name:saved.doctor, appointment_date:saved.date, appointment_time:saved.time, notes:'Booked via Chat' },
-        function() { addMsg('Appointment confirmed!\n\nName: ' + saved.name + '\nDoctor: ' + saved.doctor + '\nDate: ' + saved.date + '\nTime: ' + saved.time + '\n\nBring CNIC and arrive 10-15 min early. Thank you!', false); },
-        function() { addMsg('Sorry! ' + saved.doctor + ' is already booked on ' + saved.date + ' at ' + saved.time + '.\n\nType "book" to choose a different slot.', false); },
-        function() { addMsg('Connection error. Please try again by typing "book".', false); }
+        { patient_name:bk.name, phone_number:bk.phone, doctor_name:bk.doctor, appointment_date:bk.date, appointment_time:bk.time, notes:'Chat' },
+        function() { isBookingInProgress = false; addMsg('Confirmed!', false); },
+        function() { isBookingInProgress = false; addMsg('Slot taken.', false); },
+        function() { isBookingInProgress = false; addMsg('Error.', false); }
       );
-      return 'Processing your appointment...';
-    } else {
-      step = 'idle'; bk = {};
-      return 'Appointment cancelled. How else can I help you?';
+      step = 'idle'; bk = {}; return 'Processing...';
     }
+    step = 'idle'; bk = {}; return 'Cancelled.';
   }
-
-  if (t.match(/book|appoint|want to see|schedule/)) { step = 'get_name'; return "I'd love to help! What's your full name?"; }
-  if (t.match(/hello|hi|assalam|salam|hey/)) return 'Assalam o Alaikum! Welcome to Al-Shifa Clinic. I\'m Maira.\n\nHow can I help?\n- Book an appointment\n- Doctor info and fees\n- Clinic timings';
-  if (t.match(/doctor|specialist/)) return 'Our 4 specialists:\n1. Dr. Ayesha Tariq - General Physician (Rs. 1,500)\n2. Dr. Bilal Hussain - Cardiologist (Rs. 3,000)\n3. Dr. Sana Mirza - Gynecologist (Rs. 2,500)\n4. Dr. Usman Khalid - Orthopedic (Rs. 2,500)';
-  if (t.match(/fee|cost|price/)) return 'Fees:\n- Dr. Ayesha Tariq: Rs. 1,500\n- Dr. Bilal Hussain: Rs. 3,000\n- Dr. Sana Mirza: Rs. 2,500\n- Dr. Usman Khalid: Rs. 2,500\n\nPayment at clinic on day of visit.';
-  if (t.match(/time|timing|hours|open/)) return 'Timings:\n- Dr. Ayesha: Mon-Sat 10AM-2PM\n- Dr. Bilal: Mon/Wed/Fri 3PM-7PM\n- Dr. Sana: Tue/Thu/Sat 11AM-3PM\n- Dr. Usman: Mon-Fri 4PM-8PM\n\nClosed Sundays.';
-  if (t.match(/cancel|reschedule/)) return 'To cancel, provide your name and appointment details.';
-  if (t.match(/medicine|diagnosis/)) return 'I only help with bookings. Please consult the doctor for medical advice.';
-  if (t.match(/thank|bye/)) return 'Thank you for choosing Al-Shifa Clinic. Take care!';
-  return 'I can help with:\n- Booking appointments\n- Doctor info\n- Timings and fees\n\nType "book" to start!';
+  if (t.match(/book/)) { step = 'get_name'; return "What's your name?"; }
+  return 'Type "book" to start!';
 }
 
 function sendMessage() {
@@ -483,24 +388,8 @@ function sendMessage() {
 document.getElementById('chat-btn').onclick = function() {
   isOpen = !isOpen;
   document.getElementById('chat-box').style.display = isOpen ? 'flex' : 'none';
-  this.textContent = isOpen ? 'X' : '💬';
-  document.getElementById('chat-label').style.display = isOpen ? 'none' : 'block';
-  if (isOpen && document.getElementById('chat-messages').children.length === 0) {
-    setTimeout(function() {
-      addMsg('Assalam o Alaikum! Welcome to Al-Shifa Clinic. I\'m Maira.\n\nHow can I help?\n- Book an appointment\n- Doctor info and fees\n- Clinic timings', false);
-    }, 300);
-  }
 };
-
-document.getElementById('chat-close').onclick = function() {
-  isOpen = false;
-  document.getElementById('chat-box').style.display = 'none';
-  document.getElementById('chat-btn').textContent = '💬';
-  document.getElementById('chat-label').style.display = 'block';
-};
-
 document.getElementById('chat-send').onclick = sendMessage;
-document.getElementById('chat-input').onkeypress = function(e) { if (e.key === 'Enter') sendMessage(); };
 </script>
 </body>
 </html>
