@@ -219,14 +219,14 @@ footer { background:#0a2540; color:white; padding:3rem 5%; text-align:center; }
 </div>
 
 <script>
-var SHEET_URL = 'https://script.google.com/macros/s/AKfycbySPls79IP6cjBrqyxCIx3RwHNBuXXt5NNb-7fjnCoVOBFF_BevPwaY4c1umOD5tBUs/exec';
-var isBookingInProgress = false; // LOCKING VARIABLE
+var SHEET_URL = 'https://script.google.com/macros/s/AKfycbwYNpJLSRuW6W5Sqo1CNc4fGhUvxSx5_YJB_3u0fqg60bNiznKf3l34_Yh4_Woiopve/exec';
+var isBookingInProgress = false;
 
 var DOC_INFO = {
   'Dr. Ayesha Tariq':  { days:[1,2,3,4,5,6], startH:10, endH:14, dayNames:'Mon-Sat', hours:'10:00 AM - 2:00 PM' },
   'Dr. Bilal Hussain': { days:[1,3,5],        startH:15, endH:19, dayNames:'Mon, Wed, Fri', hours:'3:00 PM - 7:00 PM' },
   'Dr. Sana Mirza':    { days:[2,4,6],        startH:11, endH:15, dayNames:'Tue, Thu, Sat', hours:'11:00 AM - 3:00 PM' },
-  'Dr. Usman Khalid':  { days:[1,2,3,4,5],   startH:16, endH:20, dayNames:'Mon-Fri', hours:'4:00 PM - 8:00 PM' }
+  'Dr. Usman Khalid':  { days:[1,2,3,4,5],    startH:16, endH:20, dayNames:'Mon-Fri', hours:'4:00 PM - 8:00 PM' }
 };
 
 function saveToSheets(data, onSuccess, onDuplicate, onError) {
@@ -236,6 +236,7 @@ function saveToSheets(data, onSuccess, onDuplicate, onError) {
     '&appointment_date=' + encodeURIComponent(data.appointment_date) +
     '&appointment_time=' + encodeURIComponent(data.appointment_time) +
     '&notes=' + encodeURIComponent(data.notes || '');
+
   fetch(SHEET_URL + '?' + params)
     .then(function(r) { return r.json(); })
     .then(function(res) {
@@ -248,7 +249,7 @@ function saveToSheets(data, onSuccess, onDuplicate, onError) {
 
 function parseDate(str) {
   var iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (iso) return new Date(parseInt(iso[1]), parseInt(iso[2])-1, parseInt(iso[3]));
+  if (iso) return new Date(parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3]));
   return new Date(str);
 }
 
@@ -256,7 +257,7 @@ function parseTime(str) {
   str = str.toLowerCase().trim();
   var isPM = str.indexOf('pm') !== -1;
   var isAM = str.indexOf('am') !== -1;
-  str = str.replace('pm','').replace('am','').trim();
+  str = str.replace('pm', '').replace('am', '').trim();
   var parts = str.split(':');
   var hour = parseInt(parts[0]) || 0;
   var min = parseInt(parts[1] || 0);
@@ -268,16 +269,22 @@ function parseTime(str) {
 function validateDoctor(doctor, dateStr, timeStr) {
   var info = DOC_INFO[doctor];
   if (!info) return { ok: true };
+
   var d = parseDate(dateStr);
   if (!d || isNaN(d.getTime())) return { ok: false, msg: 'Could not understand the date. Please use YYYY-MM-DD.' };
+
   var dayOfWeek = d.getDay();
   if (dayOfWeek === 0) return { ok: false, msg: 'Clinic is closed on Sundays!' };
-  if (info.days.indexOf(dayOfWeek) === -1) return { ok: false, msg: doctor + ' is NOT available on this day!' };
+  if (info.days.indexOf(dayOfWeek) === -1) return { ok: false, msg: doctor + ' is not available on this day!' };
+
   if (timeStr && timeStr.trim()) {
     var t = parseTime(timeStr);
     var totalMins = t.hour * 60 + t.min;
-    if (totalMins < info.startH * 60 || totalMins >= info.endH * 60) return { ok: false, msg: doctor + ' is NOT available at this time!' };
+    if (totalMins < info.startH * 60 || totalMins >= info.endH * 60) {
+      return { ok: false, msg: doctor + ' is not available at this time!' };
+    }
   }
+
   return { ok: true };
 }
 
@@ -296,32 +303,73 @@ function validateFormDate() {
   var doc = document.getElementById('f-doctor').value;
   var date = document.getElementById('f-date').value;
   var err = document.getElementById('date-error');
-  if (!doc || !date) { err.style.display = 'none'; return; }
+  if (!doc || !date) {
+    err.style.display = 'none';
+    return;
+  }
   var result = validateDoctor(doc, date, null);
-  if (!result.ok) { err.textContent = result.msg; err.style.display = 'block'; } else { err.style.display = 'none'; }
+  if (!result.ok) {
+    err.textContent = result.msg;
+    err.style.display = 'block';
+  } else {
+    err.style.display = 'none';
+  }
 }
 
 function submitForm() {
   if (isBookingInProgress) return;
+
   var n = document.getElementById('f-name').value.trim();
   var p = document.getElementById('f-phone').value.trim();
   var d = document.getElementById('f-doctor').value;
   var dt = document.getElementById('f-date').value;
   var tm = document.getElementById('f-time').value;
   var nt = document.getElementById('f-notes').value.trim();
-  if (!n || !p || !d || !dt || !tm) { alert('Please fill in all required fields.'); return; }
+
+  if (!n || !p || !d || !dt || !tm) {
+    alert('Please fill in all required fields.');
+    return;
+  }
+
   var validation = validateDoctor(d, dt, tm);
-  if (!validation.ok) { alert(validation.msg); return; }
+  if (!validation.ok) {
+    alert(validation.msg);
+    return;
+  }
 
   isBookingInProgress = true;
   var btn = document.getElementById('submit-btn');
   btn.textContent = 'Processing...';
 
   saveToSheets(
-    { patient_name:n, phone_number:p, doctor_name:d, appointment_date:dt, appointment_time:tm, notes:nt },
-    function() { isBookingInProgress = false; alert('Booked successfully!'); btn.textContent = 'Confirm Appointment'; },
-    function() { isBookingInProgress = false; alert('Slot taken!'); btn.textContent = 'Confirm Appointment'; },
-    function() { isBookingInProgress = false; alert('Error!'); btn.textContent = 'Confirm Appointment'; }
+    {
+      patient_name: n,
+      phone_number: p,
+      doctor_name: d,
+      appointment_date: dt,
+      appointment_time: tm,
+      notes: nt
+    },
+    function() {
+      isBookingInProgress = false;
+      document.getElementById('success-msg').style.display = 'block';
+      document.getElementById('error-msg').style.display = 'none';
+      btn.textContent = 'Confirm Appointment';
+    },
+    function() {
+      isBookingInProgress = false;
+      document.getElementById('error-msg').textContent = 'Slot taken!';
+      document.getElementById('error-msg').style.display = 'block';
+      document.getElementById('success-msg').style.display = 'none';
+      btn.textContent = 'Confirm Appointment';
+    },
+    function() {
+      isBookingInProgress = false;
+      document.getElementById('error-msg').textContent = 'Error!';
+      document.getElementById('error-msg').style.display = 'block';
+      document.getElementById('success-msg').style.display = 'none';
+      btn.textContent = 'Confirm Appointment';
+    }
   );
 }
 
@@ -341,38 +389,75 @@ function addMsg(text, isUser) {
 
 function getReply(text) {
   var t = text.toLowerCase().trim();
-  if (step === 'get_name') { bk.name = text.trim(); step = 'get_phone'; return 'Thank you ' + bk.name + '! Please share your phone number.'; }
-  if (step === 'get_phone') { bk.phone = text.trim(); step = 'get_doctor'; return 'Type 1, 2, 3 or 4 for doctor selection.'; }
-  if (step === 'get_doctor') {
-    var doc = DOCTORS[t]; if (!doc) return 'Type 1, 2, 3 or 4.';
-    bk.doctor = doc; step = 'get_date'; return 'Enter date YYYY-MM-DD.';
+
+  if (step === 'get_name') {
+    bk.name = text.trim();
+    step = 'get_phone';
+    return 'Thank you, ' + bk.name + '! Please share your phone number.';
   }
+
+  if (step === 'get_phone') {
+    bk.phone = text.trim();
+    step = 'get_doctor';
+    return 'Type 1, 2, 3, or 4 for doctor selection.';
+  }
+
+  if (step === 'get_doctor') {
+    var doc = DOCTORS[t];
+    if (!doc) return 'Type 1, 2, 3, or 4.';
+    bk.doctor = doc;
+    step = 'get_date';
+    return 'Enter date in YYYY-MM-DD format.';
+  }
+
   if (step === 'get_date') {
     var validation = validateDoctor(bk.doctor, text.trim(), null);
     if (!validation.ok) return validation.msg;
-    bk.date = text.trim(); step = 'get_time'; return 'Enter time (HH:MM).';
+    bk.date = text.trim();
+    step = 'get_time';
+    return 'Enter time in HH:MM format.';
   }
+
   if (step === 'get_time') {
     var validation = validateDoctor(bk.doctor, bk.date, text.trim());
     if (!validation.ok) return validation.msg;
-    bk.time = text.trim(); step = 'confirm'; return 'Confirm? Type YES.';
+    bk.time = text.trim();
+    step = 'confirm';
+    return 'Confirm booking? Type YES.';
   }
+
   if (step === 'confirm') {
     if (t.match(/yes|confirm/)) {
       if (isBookingInProgress) return 'Already processing...';
       isBookingInProgress = true;
       saveToSheets(
-        { patient_name:bk.name, phone_number:bk.phone, doctor_name:bk.doctor, appointment_date:bk.date, appointment_time:bk.time, notes:'Chat' },
+        {
+          patient_name: bk.name,
+          phone_number: bk.phone,
+          doctor_name: bk.doctor,
+          appointment_date: bk.date,
+          appointment_time: bk.time,
+          notes: 'Chat'
+        },
         function() { isBookingInProgress = false; addMsg('Confirmed!', false); },
         function() { isBookingInProgress = false; addMsg('Slot taken.', false); },
         function() { isBookingInProgress = false; addMsg('Error.', false); }
       );
-      step = 'idle'; bk = {}; return 'Processing...';
+      step = 'idle';
+      bk = {};
+      return 'Processing...';
     }
-    step = 'idle'; bk = {}; return 'Cancelled.';
+    step = 'idle';
+    bk = {};
+    return 'Cancelled.';
   }
-  if (t.match(/book/)) { step = 'get_name'; return "What's your name?"; }
-  return 'Type "book" to start!';
+
+  if (t.match(/book/)) {
+    step = 'get_name';
+    return "What is your name?";
+  }
+
+  return 'Type "book" to start.';
 }
 
 function sendMessage() {
@@ -390,6 +475,13 @@ document.getElementById('chat-btn').onclick = function() {
   document.getElementById('chat-box').style.display = isOpen ? 'flex' : 'none';
 };
 document.getElementById('chat-send').onclick = sendMessage;
+document.getElementById('chat-input').addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') sendMessage();
+});
+document.getElementById('chat-close').onclick = function() {
+  isOpen = false;
+  document.getElementById('chat-box').style.display = 'none';
+};
 </script>
 </body>
 </html>
